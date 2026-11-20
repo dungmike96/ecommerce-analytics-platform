@@ -1,0 +1,323 @@
+version: 2
+
+models:
+
+  # ==========================================================
+  # ORDERS
+  # Grain: 1 row = 1 order
+  # ==========================================================
+  - name: stg_nhanh_orders
+    description: >
+      Staging model for Nhanh.vn orders.
+      One row represents one order.
+
+    columns:
+
+      - name: order_id
+        description: Unique Nhanh.vn order identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: depot_id
+        description: Depot associated with the order.
+        data_tests:
+          - not_null
+
+      - name: status_id
+        description: Nhanh.vn order status identifier.
+        data_tests:
+          - not_null
+
+      - name: created_at
+        description: Timestamp when the order was created.
+        data_tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the order was last updated.
+        data_tests:
+          - not_null
+
+      - name: sale_channel_id
+        description: Nhanh.vn sales channel identifier.
+        data_tests:
+          - not_null
+
+      - name: customer_id
+        description: Customer identifier from shippingAddress.
+        data_tests:
+          - not_null
+
+      - name: cod_amount
+        description: Amount to be collected from the customer.
+        data_tests:
+          - not_null
+
+      - name: business_payment
+        description: Payment amount attributed to the business.
+        data_tests:
+          - not_null
+
+
+  # ==========================================================
+  # ORDER ITEMS
+  # Grain: 1 row = 1 order product line
+  # ==========================================================
+  - name: stg_nhanh_order_items
+    description: >
+      Product lines extracted from the products array of Nhanh.vn
+      orders. One row represents one order product line.
+
+    columns:
+
+      - name: order_product_id
+        description: Unique identifier of the order product line.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Parent Nhanh.vn order identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_nhanh_orders')
+                field: order_id
+
+      - name: product_id
+        description: Nhanh.vn product identifier.
+        data_tests:
+          - not_null
+
+      - name: quantity
+        description: Quantity of product on the order line.
+        data_tests:
+          - not_null
+
+      - name: unit_price
+        description: Product selling price from Nhanh.vn.
+        data_tests:
+          - not_null
+
+      - name: discount_amount
+        description: Total discount amount for the product line.
+        data_tests:
+          - not_null
+
+      - name: avg_cost
+        description: Average product cost reported by Nhanh.vn.
+        data_tests:
+          - not_null
+
+      - name: total_amount
+        description: Total amount of the product line.
+        data_tests:
+          - not_null
+
+
+  # ==========================================================
+  # GIFTS
+  # Grain: 1 row = 1 gift line inside an order
+  # ==========================================================
+  - name: stg_nhanh_order_gifts
+    description: >
+      Gift lines extracted from the gifts array of Nhanh.vn orders.
+      gift_line_number preserves the position of the gift in the
+      source JSON array.
+
+    columns:
+
+      - name: order_id
+        description: Parent Nhanh.vn order identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_nhanh_orders')
+                field: order_id
+
+      - name: gift_line_number
+        description: Position of the gift inside the source gifts array.
+        data_tests:
+          - not_null
+
+      - name: product_id
+        description: Product identifier of the gift.
+        data_tests:
+          - not_null
+
+      - name: quantity
+        description: Gift quantity.
+        data_tests:
+          - not_null
+
+      - name: price
+        description: Gift price/value reported by Nhanh.vn.
+        data_tests:
+          - not_null
+  - name: stg_nhanh_customers
+    description: >
+      Cleaned and standardized customer data from Nhanh.vn.
+      Grain: one row per Nhanh.vn customer.
+
+    columns:
+      - name: customer_id
+        description: "Business key of the customer from Nhanh.vn."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_code
+        description: "Customer code from Nhanh.vn."
+
+      - name: customer_name
+        description: "Customer name from Nhanh.vn."
+
+      - name: customer_type_id
+        description: >
+          Customer type from Nhanh.vn:
+          1 = retail customer,
+          2 = wholesale customer,
+          3 = agent.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3]
+
+      - name: gender_id
+        description: >
+          Customer gender from Nhanh.vn:
+          1 = male,
+          2 = female.
+
+      - name: mobile
+        description: "Customer mobile number."
+
+      - name: email
+        description: "Customer email."
+
+      - name: address
+        description: "Customer address."
+
+      - name: birthday
+        description: "Customer birthday."
+
+      - name: started_date
+        description: "Date the customer started purchasing."
+
+      - name: points
+        description: "Current customer loyalty points."
+
+      - name: lifetime_purchase_amount
+        description: >
+          Total purchase amount supplied by the Nhanh.vn Customer API.
+
+      - name: sale_name
+        description: "Sales employee assigned to the customer."
+
+      - name: city_id
+        description: "Nhanh.vn city/province ID."
+
+      - name: district_id
+        description: "Nhanh.vn district ID."
+
+      - name: ward_id
+        description: "Nhanh.vn ward ID."
+
+      - name: location_city_id
+        description: "City ID from the two-level address structure."
+
+      - name: location_ward_id
+        description: "Ward ID from the two-level address structure."
+
+      - name: customer_level_id
+        description: "Nhanh.vn customer level ID."
+
+      - name: customer_level_name
+        description: "Nhanh.vn customer level name."
+
+      - name: customer_group_id
+        description: "Nhanh.vn customer group ID."
+
+      - name: customer_group_name
+        description: "Nhanh.vn customer group name."
+
+      - name: business_name
+        description: "Customer company/business name."
+
+      - name: business_address
+        description: "Customer company/business address."
+
+      - name: tax_code
+        description: "Customer tax code."
+
+      - name: source_updated_at
+        description: "Timestamp when the customer was last updated in Nhanh.vn."
+
+      - name: first_ingested_at
+        description: "Timestamp when the customer was first ingested into RAW."
+
+      - name: last_ingested_at
+        description: "Timestamp when the customer was last processed by ingestion."
+  - name: stg_nhanh_products
+    description: >
+      Cleaned and standardized Nhanh.vn product master data.
+      Grain: one row per product_id.
+
+    columns:
+      - name: product_id
+        description: "Unique Nhanh.vn product identifier."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: "Product name from Nhanh.vn."
+
+      - name: parent_product_id
+        description: "Parent product identifier for product variants."
+
+      - name: barcode
+        description: "Product barcode."
+
+      - name: status_id
+        description: "Nhanh.vn product status."
+
+      - name: average_cost
+        description: "Current average product cost returned by Nhanh.vn."
+
+
+  - name: stg_nhanh_inventory
+    description: >
+      Daily depot-level inventory snapshots from Nhanh.vn.
+      Grain: one row per snapshot_date, product_id and depot_id.
+
+    columns:
+      - name: snapshot_date
+        data_tests:
+          - not_null
+
+      - name: product_id
+        data_tests:
+          - not_null
+
+      - name: depot_id
+        data_tests:
+          - not_null
+
+      - name: remain_quantity
+        description: "Physical inventory quantity at the depot."
+
+      - name: available_quantity
+        description: "Quantity currently available for sale."
+
+      - name: has_negative_remain
+        description: >
+          True when Nhanh.vn reports a negative remaining
+          inventory quantity.
+
+      - name: snapshot_at
+        data_tests:
+          - not_null

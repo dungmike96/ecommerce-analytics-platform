@@ -1,0 +1,16 @@
+# ============================================================
+# ECOMMERCE DWH - Python Dependencies
+# ============================================================
+
+# Nhanh.vn API ingestion
+requests==2.34.2
+
+# PostgreSQL driver
+psycopg2-binary==2.9.13
+
+# Environment variables
+python-dotenv==1.2.3
+
+# dbt + PostgreSQL adapter
+dbt-core==1.12.5
+dbt-postgres==1.11.0

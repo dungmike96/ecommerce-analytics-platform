@@ -1,0 +1,14 @@
+
+version: 2
+
+sources:
+  - name: google_sheets
+    description: "Google Sheets financial data for ZOSEO"
+    database: data_center
+    schema: raw
+
+    tables:
+      - name: google_sheets_expenses
+        description: >
+          Raw expense and cash disbursement
+          records from Google Sheets tab CHI TIỀN.

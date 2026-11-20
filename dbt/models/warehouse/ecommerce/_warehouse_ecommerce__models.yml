@@ -1,0 +1,622 @@
+version: 2
+
+models:
+
+    # ==========================================================
+  # DIMENSION: SALES CHANNEL
+  # Grain: 1 row = 1 sale_channel_id
+  # ==========================================================
+
+  - name: dim_channel
+    description: >
+      Warehouse sales-channel dimension derived from
+      int_nhanh_orders_classified.
+
+      Grain: one row per sale_channel_id.
+
+      sale_channel_name is mapped from the official Nhanh.vn
+      saleChannel definitions.
+
+      sale_channel_group is an internal DWH analytical
+      classification and is not an official Nhanh.vn field.
+
+    columns:
+
+      - name: sale_channel_id
+        description: >
+          Raw sales channel identifier originating from Nhanh.
+          This is the primary business key of the dimension.
+        tests:
+          - not_null
+          - unique
+
+      - name: sale_channel_name
+        description: >
+          Official readable sales-channel name mapped from
+          the Nhanh.vn saleChannel identifier.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Admin'
+                  - 'Website'
+                  - 'API'
+                  - 'Facebook'
+                  - 'Instagram'
+                  - 'Lazada'
+                  - 'Shopee'
+                  - 'Sendo'
+                  - 'Tiki'
+                  - 'TikTok Shop'
+                  - 'Zalo OA'
+                  - 'Shopee Chat'
+                  - 'Lazada Chat'
+                  - 'Zalo Personal'
+                  - 'UNKNOWN'
+
+      - name: sale_channel_group
+        description: >
+          Internal DWH analytical grouping of the official
+          Nhanh.vn sales channels.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'MARKETPLACE'
+                  - 'OWNED_ONLINE'
+                  - 'SOCIAL'
+                  - 'API'
+                  - 'MANUAL'
+                  - 'UNKNOWN'
+
+      - name: is_verified
+        description: >
+          Boolean indicating whether sale_channel_id has an
+          official mapping defined from Nhanh.vn documentation.
+        tests:
+          - not_null
+
+  # ==========================================================
+  # DIMENSION: ORDER STATUS
+  # Grain: 1 row = 1 status_id
+  # ==========================================================
+
+  - name: dim_status
+    description: >
+      Warehouse order-status dimension derived from
+      int_nhanh_orders_classified.
+
+      Grain: one row per status_id.
+
+      status_name is mapped from the official Nhanh.vn
+      order-status definitions.
+
+      Unknown future status identifiers remain UNVERIFIED
+      until an authoritative mapping is available.
+
+    columns:
+
+      - name: status_id
+        description: >
+          Raw order status identifier originating from Nhanh.
+          This is the business key of the dimension.
+        tests:
+          - not_null
+          - unique
+
+      - name: status_name
+        description: >
+          Official readable order-status name mapped from
+          the Nhanh.vn status identifier.
+        tests:
+          - not_null
+
+      - name: status_mapping_state
+        description: >
+          Verification state of the status mapping.
+          VERIFIED means the status identifier is mapped from
+          official Nhanh.vn documentation. UNVERIFIED is retained
+          for unknown future status identifiers.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'VERIFIED'
+                  - 'UNVERIFIED'
+
+      - name: is_verified
+        description: >
+          Boolean indicating whether status_id has an official
+          mapping defined from Nhanh.vn documentation.
+        tests:
+          - not_null
+  # ==========================================================
+  # DIMENSION: DATE
+  # Grain: 1 row = 1 calendar date
+  # ==========================================================
+
+  - name: dim_date
+    description: >
+      Warehouse calendar dimension generated from the minimum
+      order date through the end of the latest calendar year
+      represented in the Nhanh order dataset.
+
+      Grain: one row per calendar date.
+
+      The continuous calendar supports time-series analysis
+      even on dates with no orders.
+
+    columns:
+
+      - name: date_key
+        description: >
+          Integer surrogate-style date key in YYYYMMDD format.
+          Example: 2026-09-28 becomes 20260928.
+        tests:
+          - not_null
+          - unique
+
+      - name: full_date
+        description: Calendar date represented by this row.
+        tests:
+          - not_null
+          - unique
+
+      - name: year
+        description: Calendar year.
+        tests:
+          - not_null
+
+      - name: quarter
+        description: Calendar quarter number from 1 to 4.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+
+      - name: month_number
+        description: Calendar month number from 1 to 12.
+        tests:
+          - not_null
+
+      - name: month_name
+        description: English calendar month name.
+        tests:
+          - not_null
+
+      - name: year_month
+        description: Calendar year and month in YYYY-MM format.
+        tests:
+          - not_null
+
+      - name: day_of_month
+        description: Day number within the month.
+        tests:
+          - not_null
+
+      - name: day_of_week
+        description: >
+          PostgreSQL day-of-week number where Sunday is 0
+          and Saturday is 6.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6]
+
+      - name: day_name
+        description: English calendar weekday name.
+        tests:
+          - not_null
+
+      - name: is_weekend
+        description: >
+          True when the calendar date is Saturday or Sunday.
+        tests:
+          - not_null
+    # ==========================================================
+  # FACT: ORDERS
+  # Grain: 1 row = 1 order_id
+  # ==========================================================
+
+  - name: fact_orders
+    description: >
+      Canonical order-level fact table for Nhanh.vn ecommerce analytics.
+      Grain: one row per order_id.
+
+      This model is the canonical source of truth for order-level BI
+      financial metrics including total orders, gross sales, discount,
+      net sales, estimated COGS and estimated gross profit.
+
+      Downstream analytics models must reconcile their additive financial
+      metrics back to this model.
+
+      estimated_cogs and estimated_gross_profit are analytical estimates
+      based on available average-cost information and must not be treated
+      as accounting-book profit.
+
+    columns:
+
+      - name: order_id
+        description: >
+          Unique business identifier of the Nhanh order.
+        tests:
+          - not_null
+          - unique
+
+      - name: order_date_key
+        description: >
+          Date dimension key in YYYYMMDD integer format,
+          derived from order_date.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: sale_channel_id
+        description: >
+          Sales channel business key used to join dim_channel.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_channel')
+                field: sale_channel_id
+
+      - name: status_id
+        description: >
+          Raw Nhanh order status identifier used to join
+          dim_status. Business meaning remains unverified.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_status')
+                field: status_id
+
+      - name: customer_id
+        description: >
+          Customer identifier.
+          Value 0 represents an unknown customer identity.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: created_time_key
+        tests:
+          - relationships:
+                to: ref('dim_time')
+                field: time_key
+      - name: depot_id
+        description: >
+          Nhanh depot identifier. A depot dimension has not yet
+          been introduced in Warehouse v1.
+
+      - name: order_date
+        description: Calendar date on which the order was created.
+        tests:
+          - not_null
+
+      - name: created_at
+        description: Timestamp when the order was created.
+        tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the order was last updated.
+
+      - name: total_item_lines
+        description: >
+          Number of product item rows associated with the order.
+
+      - name: total_quantity
+        description: >
+          Total product quantity associated with the order.
+
+      - name: gross_sales_amount
+        description: >
+          Aggregated gross item sales inherited from the
+          Intermediate layer.
+
+      - name: discount_amount
+        description: >
+          Aggregated item discount amount inherited from the
+          Intermediate layer.
+
+      - name: net_sales_amount
+        description: >
+          Analytical net sales amount inherited from the
+          Intermediate layer.
+
+      - name: estimated_cogs
+        description: >
+          Estimated cost of goods sold inherited from the
+          Intermediate layer.
+
+      - name: estimated_gross_profit
+        description: >
+          Estimated gross profit inherited from the
+          Intermediate layer.
+
+      - name: cod_amount
+        description: >
+          COD amount reported at order level by the source.
+
+      - name: business_payment
+        description: >
+          Business payment amount reported at order level
+          by the source.
+
+      - name: has_items
+        description: >
+          Boolean indicating whether the order has item records.
+        tests:
+          - not_null
+
+      - name: has_zero_cost_items
+        description: >
+          Boolean data-quality flag indicating that at least
+          one item associated with the order lacks usable cost.
+        tests:
+          - not_null
+
+      - name: has_net_formula_mismatch
+        description: >
+          Boolean data-quality flag indicating that at least
+          one item does not match the expected net-sales formula.
+        tests:
+          - not_null
+
+      - name: sale_channel_name
+        description: >
+          Provisional channel name copied from Intermediate
+          for debugging and convenience.
+
+      - name: sale_channel_group
+        description: >
+          Provisional higher-level channel group copied from
+          Intermediate for debugging and convenience.
+      - name: adjusted_revenue_amount
+  - name: fact_order_items
+    description: >
+      Order-item fact table derived from int_nhanh_order_items_enriched.
+      Grain is one row per order_product_id. Financial measures are inherited
+      from the Intermediate layer without recalculating business logic.
+
+    columns:
+
+      - name: order_product_id
+        description: Unique identifier for an order item line.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order identifier linking each item line to fact_orders.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fact_orders')
+                field: order_id
+
+      - name: product_id
+        description: >
+          Product identifier from Nhanh.vn.
+          Foreign key to dim_product.product_id.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+      - name: product_code
+        description: Product code from the source system.
+
+      - name: product_name
+        description: Product name from the source system.
+
+      - name: quantity
+        description: Quantity of product on the order item line.
+        data_tests:
+          - not_null
+
+      - name: unit_price
+        description: Unit price inherited from the Intermediate layer.
+
+      - name: discount_amount
+        description: Total discount amount for the order item line.
+
+      - name: avg_cost
+        description: Average unit cost supplied by the source and standardized upstream.
+
+      - name: total_amount
+        description: Source total amount for the order item line.
+
+      - name: gross_sales_amount
+        description: Gross sales amount standardized in the Intermediate layer.
+
+      - name: net_sales_amount
+        description: Net sales amount standardized in the Intermediate layer.
+
+      - name: estimated_cogs
+        description: Estimated cost of goods sold calculated in the Intermediate layer.
+
+      - name: estimated_gross_profit
+        description: Estimated gross profit derived in the Intermediate layer.
+
+      - name: has_cost
+        description: >
+          Data-quality flag indicating whether the item line has usable cost information.
+        data_tests:
+          - not_null
+
+      - name: matches_expected_net_formula
+        description: >
+          Data-quality flag indicating whether the source total amount matches
+          the expected net-sales formula identified during financial discovery.
+        data_tests:
+          - not_null
+  - name: dim_product
+    description: >
+      Product dimension derived from Nhanh order-item data.
+      Grain: one row per product_id.
+      product_id is the stable product identifier observed in the source data.
+      product_code is intentionally excluded because it is currently null/blank
+      for all observed order-item records.
+
+    columns:
+      - name: product_id
+        description: >
+          Unique product identifier from Nhanh.vn.
+          Primary business key of the product dimension.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: >
+          Product name associated with the product_id.
+          Discovery confirmed that each observed product_id maps to one
+          distinct product_name.
+        data_tests:
+          - not_null
+  - name: dim_customers
+    description: >
+      Customer dimension containing the current state of
+      Nhanh.vn customers plus the Unknown / Guest member.
+
+    columns:
+
+      - name: customer_id
+        description: >
+          Customer business key.
+          Value 0 represents Unknown / Guest.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_name
+        description: >
+          Customer display name.
+          Missing source names are standardized as
+          Unnamed Customer.
+        data_tests:
+          - not_null
+
+      - name: customer_type_id
+        description: "Nhanh.vn customer type."
+
+      - name: customer_level_id
+        description: "Nhanh.vn customer level ID."
+
+      - name: customer_group_id
+        description: "Nhanh.vn customer group ID."
+
+      - name: lifetime_purchase_amount
+        description: >
+          Lifetime purchase amount supplied by
+          the Nhanh.vn Customer API.
+      - name: marketplace_order_id
+        description: >
+          External marketplace order identifier from Nhanh.vn
+          channel.appOrderId. Used for matching Nhanh orders
+          with marketplace source systems such as Shopee or TikTok.
+
+      - name: marketplace_shop_id
+        description: >
+          External marketplace shop identifier from Nhanh.vn
+          channel.shopId.
+
+  - name: fact_inventory_snapshot
+    description: >
+      Daily depot-level inventory snapshot.
+      Grain: one row per snapshot_date, product_id and depot_id.
+
+    columns:
+      - name: snapshot_date
+        description: "Business date of the inventory snapshot."
+        data_tests:
+          - not_null
+
+      - name: snapshot_date_key
+        description: "Integer date key in YYYYMMDD format."
+        data_tests:
+          - not_null
+
+      - name: product_id
+        description: "Nhanh.vn product identifier."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+      - name: depot_id
+        description: "Nhanh.vn depot identifier."
+        data_tests:
+          - not_null
+
+      - name: remain_quantity
+        description: "Physical remaining inventory at the depot."
+
+      - name: available_quantity
+        description: "Inventory currently available for sale."
+
+      - name: shipping_quantity
+        description: "Inventory currently in shipping state."
+
+      - name: damaged_quantity
+        description: "Damaged inventory quantity."
+
+      - name: holding_quantity
+        description: "Inventory currently being held/reserved."
+
+      - name: transferring_quantity
+        description: "Inventory currently being transferred."
+
+      - name: warranty_remain_quantity
+        description: "Warranty inventory remaining."
+
+      - name: warranty_holding_quantity
+        description: "Warranty inventory currently held."
+
+      - name: has_negative_remain
+        description: "True when depot remaining inventory is negative."
+
+      - name: snapshot_at
+        description: "Timestamp at which the inventory snapshot scan started."
+        data_tests:
+          - not_null
+  - name: dim_time
+    description: "Time dimension with one row per hour of day"
+
+    columns:
+
+      - name: time_key
+        tests:
+        - unique
+        - not_null
+
+      - name: hour_of_day
+        tests:
+          - unique
+          - not_null
+
+      - name: time_slot
+        tests:
+          - not_null
+
+      - name: time_slot_sort
+        tests:
+          - not_null

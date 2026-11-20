@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: ecom_source
+    database: data_center # Khớp chính xác tên database thật của bạn
+    schema: staging
+    tables:
+      - name: raw_users
+        description: "Bảng lưu trữ thông tin thông tin tài khoản khách hàng"
+      - name: raw_orders
+        description: "Bảng lưu trữ chi tiết lịch sử đơn hàng phát sinh"

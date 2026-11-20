@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: ga4_traffic_acquisition_daily
+      - name: ga4_landing_pages_daily
+      - name: ga4_events_daily

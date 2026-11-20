@@ -1,0 +1,20 @@
+version: 2
+models:
+  - name: stg_google_sheets_expenses
+    description: "Normalized cash disbursement entries from Google Sheets CHI TIỀN."
+    columns:
+      - name: spreadsheet_id
+        data_tests:
+          - not_null
+      - name: sheet_name
+        data_tests:
+          - not_null
+      - name: source_row_number
+        data_tests:
+          - not_null
+      - name: row_hash
+        data_tests:
+          - not_null
+      - name: transaction_date
+        data_tests:
+          - not_null

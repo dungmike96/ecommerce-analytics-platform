@@ -1,0 +1,545 @@
+version: 2
+
+models:
+
+  # ==========================================================
+  # 1. ITEM-LEVEL ENRICHED
+  # Grain: 1 row = 1 order_product_id
+  # ==========================================================
+
+  - name: int_nhanh_order_items_enriched
+    description: >
+      Intermediate item-level model derived from
+      stg_nhanh_order_items.
+
+      Adds calculated sales, cost, gross-profit and
+      net-sales semantic classification fields.
+
+      Historical investigation identified two valid
+      net-sales semantics in Nhanh data:
+
+      OLD:
+        net_sales_amount = gross_sales_amount
+
+      NEW:
+        net_sales_amount =
+        gross_sales_amount - discount_amount
+
+      Zero-discount rows are classified separately because
+      OLD and NEW formulas are mathematically indistinguishable
+      when discount_amount = 0.
+
+      Grain: one row per order_product_id.
+
+    columns:
+
+      # ------------------------------------------------------
+      # KEYS
+      # ------------------------------------------------------
+
+      - name: order_product_id
+        description: Unique identifier of an order item line.
+        tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Parent Nhanh order identifier.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_nhanh_orders')
+                field: order_id
+
+      - name: product_id
+        description: Nhanh product identifier.
+        tests:
+          - not_null
+
+      # ------------------------------------------------------
+      # QUANTITY
+      # ------------------------------------------------------
+
+      - name: quantity
+        description: Quantity of product on the order line.
+        tests:
+          - not_null
+
+      # ------------------------------------------------------
+      # FINANCIAL MEASURES
+      # ------------------------------------------------------
+
+      - name: gross_sales_amount
+        description: >
+          Gross item sales amount before discount.
+          Calculated as unit_price * quantity.
+        tests:
+          - not_null
+
+      - name: discount_amount
+        description: >
+          Discount amount reported by Nhanh for the
+          order item.
+        tests:
+          - not_null
+
+      - name: net_sales_amount
+        description: >
+          Analytical item net-sales amount derived from
+          the source total_amount field.
+
+          Historical Nhanh records may use:
+            net = gross
+
+          Current records normally use:
+            net = gross - discount
+        tests:
+          - not_null
+
+      - name: estimated_cogs
+        description: >
+          Estimated cost of goods sold calculated from
+          avg_cost * quantity.
+        tests:
+          - not_null
+
+      - name: estimated_gross_profit
+        description: >
+          Estimated item gross profit calculated as
+          net_sales_amount - estimated_cogs.
+        tests:
+          - not_null
+
+      # ------------------------------------------------------
+      # DATA QUALITY
+      # ------------------------------------------------------
+
+      - name: has_cost
+        description: >
+          Boolean data-quality flag indicating whether the
+          item has usable average-cost information.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+      - name: net_sales_semantic
+        description: >
+          Classification describing which net-sales formula
+          is represented by the source data.
+
+          ZERO_DISCOUNT:
+            discount_amount = 0. OLD and NEW formulas are
+            indistinguishable.
+
+          OLD_NET_EQUALS_GROSS:
+            Historical Nhanh semantic where
+            net_sales_amount = gross_sales_amount even when
+            a discount is present.
+
+          NEW_NET_EQUALS_GROSS_MINUS_DISCOUNT:
+            Current Nhanh semantic where
+            net_sales_amount =
+            gross_sales_amount - discount_amount.
+
+          INVALID_NET_FORMULA:
+            Row does not match any currently recognized
+            financial semantic and requires investigation.
+
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - ZERO_DISCOUNT
+                  - OLD_NET_EQUALS_GROSS
+                  - NEW_NET_EQUALS_GROSS_MINUS_DISCOUNT
+                  - INVALID_NET_FORMULA
+
+      - name: matches_expected_net_formula
+        description: >
+          Boolean data-quality flag derived from
+          net_sales_semantic.
+
+          TRUE for all recognized valid Nhanh financial
+          semantics:
+            ZERO_DISCOUNT,
+            OLD_NET_EQUALS_GROSS,
+            NEW_NET_EQUALS_GROSS_MINUS_DISCOUNT.
+
+          FALSE only when the row is classified as
+          INVALID_NET_FORMULA.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+
+  # ==========================================================
+  # 2. ORDER-LEVEL ENRICHED
+  # Grain: 1 row = 1 order_id
+  # ==========================================================
+
+  - name: int_nhanh_orders_enriched
+    description: >
+      Order-level intermediate model combining staged Nhanh
+      orders with aggregated item-level financial metrics.
+
+      Orders without item records are retained using a left join.
+
+      Net-formula mismatch counts are based on the semantic
+      classification performed in
+      int_nhanh_order_items_enriched.
+
+      Grain: one row per order_id.
+
+    columns:
+
+      # ------------------------------------------------------
+      # KEYS
+      # ------------------------------------------------------
+
+      - name: order_id
+        description: Unique Nhanh order identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: Nhanh customer identifier.
+
+      - name: depot_id
+        description: Nhanh depot identifier.
+
+      - name: sale_channel_id
+        description: Raw sales channel identifier from Nhanh.
+
+      # ------------------------------------------------------
+      # STATUS
+      # ------------------------------------------------------
+
+      - name: status_id
+        description: Raw order status identifier from Nhanh.
+
+      # ------------------------------------------------------
+      # TIME
+      # ------------------------------------------------------
+
+      - name: created_at
+        description: Timestamp when the order was created.
+        tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the order was last updated.
+
+      # ------------------------------------------------------
+      # SOURCE ORDER MONEY
+      # ------------------------------------------------------
+
+      - name: cod_amount
+        description: >
+          Order-level COD amount reported by the Nhanh source.
+
+      - name: business_payment
+        description: >
+          Order-level business payment amount reported by
+          the Nhanh source.
+
+      # ------------------------------------------------------
+      # ITEM AGGREGATES
+      # ------------------------------------------------------
+
+      - name: total_item_lines
+        description: >
+          Number of product lines attached to the order.
+        tests:
+          - not_null
+
+      - name: total_quantity
+        description: >
+          Total item quantity attached to the order.
+        tests:
+          - not_null
+
+      - name: gross_sales_amount
+        description: >
+          Aggregated item-level gross sales amount.
+        tests:
+          - not_null
+
+      - name: discount_amount
+        description: >
+          Aggregated item-level discount amount.
+        tests:
+          - not_null
+
+      - name: net_sales_amount
+        description: >
+          Aggregated analytical item net-sales amount.
+          Historical and current Nhanh financial semantics
+          are validated at item level before aggregation.
+        tests:
+          - not_null
+
+      - name: estimated_cogs
+        description: >
+          Aggregated estimated cost of goods sold.
+        tests:
+          - not_null
+
+      - name: estimated_gross_profit
+        description: >
+          Aggregated estimated gross profit.
+        tests:
+          - not_null
+
+      # ------------------------------------------------------
+      # DATA QUALITY
+      # ------------------------------------------------------
+
+      - name: zero_cost_lines
+        description: >
+          Number of item lines without usable cost information.
+        tests:
+          - not_null
+
+      - name: net_formula_mismatch_lines
+        description: >
+          Number of item lines classified as
+          INVALID_NET_FORMULA.
+
+          Historical OLD_NET_EQUALS_GROSS rows are recognized
+          as valid historical semantics and therefore are not
+          counted as mismatches.
+
+          Expected value under the validated dataset is zero
+          unless a new or anomalous source financial semantic
+          appears.
+        tests:
+          - not_null
+
+      - name: has_items
+        description: >
+          Boolean indicating whether the order has at least
+          one item record.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+
+  # ==========================================================
+  # 3. ORDER CLASSIFICATION
+  # Grain: 1 row = 1 order_id
+  # ==========================================================
+
+  - name: int_nhanh_orders_classified
+    description: >
+      Order-level intermediate model adding analytical
+      classifications, channel groups, date attributes and
+      data-quality flags to int_nhanh_orders_enriched.
+
+      Channel mappings remain provisional until verified
+      against official Nhanh.vn business definitions.
+
+      Financial data-quality flags inherit the semantic-aware
+      validation performed at item level.
+
+      Grain: one row per order_id.
+
+    columns:
+
+      # ------------------------------------------------------
+      # KEYS
+      # ------------------------------------------------------
+
+      - name: order_id
+        description: Unique Nhanh order identifier.
+        tests:
+          - not_null
+          - unique
+
+      # ------------------------------------------------------
+      # CHANNEL
+      # ------------------------------------------------------
+
+      - name: sale_channel_id
+        description: Raw sales channel identifier from Nhanh.
+        tests:
+          - not_null
+
+      - name: sale_channel_name
+        description: >
+          Provisional readable channel classification.
+          Current inferred mappings include IDs 48, 42, 1
+          and 2. Unmapped IDs remain UNKNOWN.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - TIKTOK_UNVERIFIED
+                  - SHOPEE_UNVERIFIED
+                  - WEBSITE_FB_UNVERIFIED
+                  - MANUAL_ORDER_UNVERIFIED
+                  - UNKNOWN
+
+      - name: sale_channel_group
+        description: >
+          Higher-level analytical grouping of the sales channel.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - MARKETPLACE
+                  - OWNED_ONLINE
+                  - MANUAL
+                  - UNKNOWN
+
+      # ------------------------------------------------------
+      # ITEM STATUS
+      # ------------------------------------------------------
+
+      - name: item_status
+        description: >
+          Indicates whether the order has item records.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - HAS_ITEMS
+                  - NO_ITEMS
+
+      # ------------------------------------------------------
+      # DATA QUALITY
+      # ------------------------------------------------------
+
+      - name: has_zero_cost_items
+        description: >
+          TRUE when at least one item line lacks usable
+          cost information.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+      - name: has_net_formula_mismatch
+        description: >
+          TRUE when at least one item line is classified as
+          INVALID_NET_FORMULA.
+
+          Historical OLD_NET_EQUALS_GROSS records are recognized
+          as a valid historical source semantic and therefore
+          do not trigger this flag.
+
+          Under the validated current dataset this flag is
+          expected to be FALSE for all orders.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+      # ------------------------------------------------------
+      # FINANCIAL FLAGS
+      # ------------------------------------------------------
+
+      - name: has_cod_amount
+        description: >
+          TRUE when COD amount is greater than zero.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+      - name: has_business_payment
+        description: >
+          TRUE when business_payment is greater than zero.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+
+      # ------------------------------------------------------
+      # DATE ATTRIBUTES
+      # ------------------------------------------------------
+
+      - name: order_date
+        description: >
+          Calendar date on which the order was created.
+        tests:
+          - not_null
+
+      - name: order_month
+        description: >
+          First day of the order creation month.
+        tests:
+          - not_null
+
+      - name: order_year
+        description: >
+          Calendar year of order creation.
+        tests:
+          - not_null
+
+      - name: order_month_number
+        description: >
+          Calendar month number from 1 to 12.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+
+      - name: order_day_of_week
+        description: >
+          PostgreSQL day-of-week number derived from created_at,
+          where Sunday is 0 and Saturday is 6.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 0
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6

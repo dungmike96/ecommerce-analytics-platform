@@ -1,0 +1,137 @@
+version: 2
+
+sources:
+  - name: nhanh
+    description: "Raw data ingested from Nhanh.vn API."
+
+    database: data_center
+    schema: raw
+
+    tables:
+
+      # ========================================================
+      # ORDERS
+      # ========================================================
+
+      - name: nhanh_orders
+        description: "Raw Nhanh.vn orders loaded by the Python ingestion pipeline."
+
+        columns:
+          - name: order_id
+            description: "Unique Nhanh.vn order ID."
+            data_tests:
+              - not_null
+              - unique
+
+          - name: api_response
+            description: "Original Nhanh.vn order payload stored as JSONB."
+            data_tests:
+              - not_null
+
+          - name: source_created_at
+            description: "Order creation timestamp from Nhanh.vn."
+
+          - name: source_updated_at
+            description: "Last update timestamp from Nhanh.vn."
+
+          - name: first_ingested_at
+            description: "Timestamp when the order was first ingested."
+
+          - name: last_ingested_at
+            description: "Timestamp when the pipeline last processed the order."
+
+
+      # ========================================================
+      # CUSTOMERS
+      # ========================================================
+
+      - name: nhanh_customers
+        description: "Raw Nhanh.vn customers loaded by the Python ingestion pipeline."
+
+        columns:
+          - name: customer_id
+            description: "Unique Nhanh.vn customer ID."
+            data_tests:
+              - not_null
+              - unique
+
+          - name: api_response
+            description: "Original Nhanh.vn customer payload stored as JSONB."
+            data_tests:
+              - not_null
+
+          - name: source_updated_at
+            description: "Last customer update timestamp from Nhanh.vn."
+
+          - name: first_ingested_at
+            description: "Timestamp when the customer was first ingested."
+
+          - name: last_ingested_at
+            description: "Timestamp when the pipeline last processed the customer."
+      - name: nhanh_products
+        description: "Raw product master data from Nhanh.vn Product API."
+
+        columns:
+          - name: product_id
+            description: "Unique Nhanh.vn product ID."
+            data_tests:
+              - not_null
+              - unique
+
+          - name: api_response
+            description: "Original Nhanh.vn product payload stored as JSONB."
+            data_tests:
+              - not_null
+
+          - name: source_created_at
+            description: "Product creation timestamp from Nhanh.vn."
+
+          - name: source_updated_at
+            description: "Product last update timestamp from Nhanh.vn."
+
+          - name: first_ingested_at
+            description: "Timestamp when the product was first ingested."
+
+          - name: last_ingested_at
+            description: "Timestamp when the product was last processed."
+
+
+      - name: nhanh_inventory_snapshots
+        description: "Daily depot-level inventory snapshots from Nhanh.vn Product API."
+
+        columns:
+          - name: snapshot_date
+            description: "Business date of the inventory snapshot."
+            data_tests:
+              - not_null
+
+          - name: product_id
+            description: "Nhanh.vn product ID."
+            data_tests:
+              - not_null
+
+          - name: depot_id
+            description: "Nhanh.vn depot ID."
+            data_tests:
+              - not_null
+
+          - name: api_response
+            description: "Depot-level inventory payload with product context."
+            data_tests:
+              - not_null
+
+          - name: snapshot_at
+            description: "Timestamp when the full inventory scan started."
+            data_tests:
+              - not_null
+      - name: nhanh_categories
+        description: "Product categories from Nhanh.vn API"
+        columns:
+          - name: category_id
+            tests:
+              - not_null
+              - unique
+
+          - name: api_response
+            tests:
+              - not_null

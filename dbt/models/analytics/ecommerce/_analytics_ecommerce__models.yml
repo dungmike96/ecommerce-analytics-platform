@@ -1,0 +1,603 @@
+version: 2
+
+models:
+  - name: fct_daily_sales
+    description: >
+      I-serving daily sales aggregate derived from the canonical
+      warehouse fact_orders model.
+
+      Grain: one row per order_date + sale_channel_id.
+
+      Designed for Power BI and Grafana reporting where daily and
+      channel-level sales analysis is required.
+
+      Additive financial metrics must reconcile to
+      data_schema.fact_orders when aggregated across all dates
+      and channels.
+
+      This model does not redefine financial business logic.
+      fact_orders remains the canonical financial source of truth.
+
+    columns:
+      - name: order_date
+        description: >
+          Calendar date on which the orders were created.
+        data_tests:
+          - not_null
+
+      - name: sale_channel_id
+        description: >
+          Identifier of the sales channel associated with the aggregated
+          daily sales record.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_channel')
+                field: sale_channel_id
+
+      - name: sale_channel_name
+        description: >
+          Standardized sales channel name used for analytics and reporting.
+        data_tests:
+          - not_null
+
+      - name: sale_channel_group
+        description: >
+          Higher-level grouping of the sales channel, such as MARKETPLACE,
+          OWNED_ONLINE, WHOLESALE, or UNKNOWN.
+        data_tests:
+          - not_null
+
+      - name: total_orders
+        description: >
+          Number of orders represented by this date-channel grain.
+          Must reconcile to fact_orders when aggregated.
+        data_tests:
+          - not_null
+
+      - name: gross_sales_amount
+        description: >
+          Aggregated gross sales amount before the discount logic represented
+          by discount_amount.
+
+      - name: discount_amount
+        description: >
+          Aggregated discount amount observed for orders in the daily
+          sales group.
+
+      - name: net_sales_amount
+        description: >
+          Aggregated net sales amount based on the financial logic established
+          in the upstream warehouse and intermediate models. This metric should
+          not be assumed to equal gross_sales_amount minus discount_amount for
+          every source order.
+
+      - name: estimated_cogs
+        description: >
+          Estimated cost of goods sold derived from product cost information
+          available in the Nhanh order-item data. This is an analytical
+          estimate and not an accounting COGS measure.
+
+      - name: estimated_gross_profit
+        description: >
+          Estimated gross profit calculated from net sales and estimated COGS.
+          This metric does not deduct marketplace fees, shipping fees,
+          marketing costs, operating expenses, taxes, or other expenses.
+          It must not be interpreted as net profit.
+
+      - name: estimated_gross_margin_pct
+        description: >
+          Estimated gross profit as a percentage of net sales.
+
+      - name: avg_order_value
+        description: >
+          Average net sales amount per order for the given date and
+          sales channel.
+
+      - name: cod_amount
+        description: >
+          Aggregated COD amount from the source orders. This is a payment
+          metric and must not be added to net sales as additional revenue.
+
+      - name: business_payment
+        description: >
+          Aggregated business payment metric from Nhanh. It is retained
+          separately from sales metrics and should not be interpreted as
+          additional revenue.
+  - name: fct_product_performance
+    description: >
+      Product-level performance analytics fact table derived from
+      fact_order_items and enriched with product attributes from dim_product.
+      Grain: one row per product_id.
+
+      The model is designed for product performance analysis in Power BI
+      and Grafana, including sales volume, revenue, estimated COGS,
+      estimated gross profit, gross margin, and average selling metrics.
+
+      Financial profitability metrics are analytical estimates.
+      estimated_gross_profit does not deduct marketplace fees, shipping fees,
+      marketing costs, operating expenses, taxes, or other business expenses
+      and must not be interpreted as net profit.
+
+    columns:
+      - name: product_id
+        description: >
+          Unique product identifier from Nhanh.vn.
+          Primary business key and grain of this analytics model.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+      - name: product_name
+        description: >
+          Product name associated with product_id from dim_product.
+        data_tests:
+          - not_null
+
+      - name: item_lines
+        description: >
+          Number of order-item rows associated with the product across
+          the available dataset.
+        data_tests:
+          - not_null
+
+      - name: order_count
+        description: >
+          Number of distinct orders containing the product.
+          This metric is not additive across products because one order
+          may contain multiple products.
+        data_tests:
+          - not_null
+
+      - name: total_quantity
+        description: >
+          Total product quantity across orders represented by this
+          date-channel grain.
+        data_tests:
+          - not_null
+
+      - name: gross_sales_amount
+        description: >
+          Gross item sales before item-level discounts.
+        data_tests:
+          - not_null
+
+      - name: discount_amount
+        description: >
+          Total item-level discount amount.
+        data_tests:
+          - not_null
+
+      - name: net_sales_amount
+        description: >
+          Canonical analytical net sales amount.
+          Must reconcile to fact_orders when aggregated.
+        data_tests:
+          - not_null
+
+      - name: estimated_cogs
+        description: >
+          Estimated cost of goods sold based on available
+          average-cost information.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_profit
+        description: >
+          Analytical estimated gross profit calculated from
+          net sales minus estimated COGS.
+          This is not an accounting-book profit measure.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_margin_pct
+        description: >
+          Estimated gross profit divided by net sales amount, expressed
+          as a percentage. Calculated after aggregation at product grain.
+
+      - name: avg_selling_price
+        description: >
+          Average net sales amount per unit sold, calculated as
+          net_sales_amount divided by total_quantity.
+
+      - name: avg_quantity_per_order
+        description: >
+          Average quantity of the product per order containing that product,
+          calculated as total_quantity divided by order_count.
+  - name: fct_channel_performance
+    description: >
+      Channel-level performance analytics fact table derived from fact_orders
+      and enriched with channel attributes from dim_channel.
+      Grain: one row per sale_channel_id.
+
+      The model is designed for Power BI and Grafana channel-performance
+      analysis, including order activity, sales, estimated profitability,
+      efficiency, and payment metrics.
+
+      Channel names and groups may remain unverified until their business
+      mapping is confirmed. sale_channel_id is therefore the stable grain
+      and business key of this model.
+
+      estimated_gross_profit and estimated_gross_margin_pct are analytical
+      estimates and must not be interpreted as net profit because marketplace
+      fees, shipping fees, marketing costs, operating expenses, taxes, and
+      other business expenses are not fully represented.
+
+      cod_amount and business_payment are payment metrics and must not be
+      interpreted as revenue.
+
+    columns:
+      - name: sale_channel_id
+        description: >
+          Stable channel identifier used as the business key and grain of
+          the model. Different channel IDs remain separate even when their
+          current channel names are identical or unknown.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_channel')
+                field: sale_channel_id
+
+      - name: sale_channel_name
+        description: >
+          Current descriptive channel name from dim_channel.
+          Some channel mappings remain unverified.
+        data_tests:
+          - not_null
+
+      - name: sale_channel_group
+        description: >
+          Higher-level channel classification from dim_channel.
+          The classification may remain unverified until confirmed
+          against the source business rules.
+        data_tests:
+          - not_null
+
+      - name: is_verified
+        description: >
+          Indicates whether the current channel classification has been
+          verified against the authoritative business/source mapping.
+        data_tests:
+          - not_null
+
+      - name: total_orders
+        description: >
+          Total number of orders assigned to the channel.
+        data_tests:
+          - not_null
+
+      - name: total_quantity
+        description: >
+          Total quantity of products contained in orders assigned to
+          the channel.
+        data_tests:
+          - not_null
+
+      - name: first_order_date
+        description: >
+          Earliest order date observed for the channel.
+        data_tests:
+          - not_null
+
+      - name: last_order_date
+        description: >
+          Latest order date observed for the channel.
+        data_tests:
+          - not_null
+
+      - name: active_days
+        description: >
+          Number of distinct order dates on which the channel recorded
+          at least one order.
+        data_tests:
+          - not_null
+
+      - name: gross_sales_amount
+        description: >
+          Aggregated gross sales amount attributed to the channel.
+        data_tests:
+          - not_null
+
+      - name: discount_amount
+        description: >
+          Aggregated discount amount attributed to the channel.
+        data_tests:
+          - not_null
+
+      - name: net_sales_amount
+        description: >
+          Aggregated net sales amount attributed to the channel.
+        data_tests:
+          - not_null
+
+      - name: estimated_cogs
+        description: >
+          Aggregated estimated cost of goods sold attributed to the channel.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_profit
+        description: >
+          Aggregated estimated gross profit attributed to the channel.
+          This metric does not deduct all marketplace fees, shipping fees,
+          marketing costs, operating expenses, taxes, or other expenses.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_margin_pct
+        description: >
+          Estimated gross profit divided by net sales amount, expressed
+          as a percentage.
+
+      - name: avg_order_value
+        description: >
+          Derived KPI calculated as net sales divided by total orders.
+
+      - name: avg_quantity_per_order
+        description: >
+          Average quantity per order, calculated as total_quantity divided
+          by total_orders.
+
+      - name: discount_rate_pct
+        description: >
+          Discount amount divided by gross sales amount, expressed as
+          a percentage.
+
+      - name: cod_amount
+        description: >
+          Aggregated COD payment amount for orders assigned to the channel.
+          This is a payment metric and is not a revenue metric.
+        data_tests:
+          - not_null
+
+      - name: business_payment
+        description: >
+          Aggregated business-payment amount for orders assigned to the
+          channel. This is a payment metric and is not a revenue metric.
+        data_tests:
+          - not_null
+
+      - name: cod_to_net_sales_pct
+        description: >
+          COD amount divided by net sales amount, expressed as a percentage.
+          Values above 100 percent may occur in source data and are not
+          automatically treated as model errors.
+
+      - name: business_payment_to_net_sales_pct
+        description: >
+          Business-payment amount divided by net sales amount, expressed
+          as a percentage.
+  - name: fct_status_performance
+    description: >
+      Status-level analytics fact table derived from fact_orders.
+      Grain: one row per status_id across the available order history.
+      Designed for Power BI and Grafana analysis of order volume,
+      sales, estimated profitability, payment metrics, and data-quality
+      indicators by order status. Status business meanings are currently
+      unverified and must not be inferred from financial behaviour.
+
+    columns:
+      - name: status_id
+        description: >
+          Order status identifier from the source system.
+          This is the grain key of the model.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_status')
+                field: status_id
+
+      - name: status_mapping_state
+        description: >
+          Current mapping state of the status. Business meanings are
+          currently unverified.
+        data_tests:
+          - not_null
+
+      - name: is_verified
+        description: >
+          Indicates whether the business meaning of the status has been
+          formally verified.
+
+      - name: total_orders
+        description: Total number of orders belonging to the status.
+        data_tests:
+          - not_null
+
+      - name: total_quantity
+        description: Total product quantity across orders in the status.
+        data_tests:
+          - not_null
+
+      - name: first_order_date
+        description: Earliest order date observed for the status.
+        data_tests:
+          - not_null
+
+      - name: last_order_date
+        description: Latest order date observed for the status.
+        data_tests:
+          - not_null
+
+      - name: active_days
+        description: Number of distinct order dates on which the status appears.
+        data_tests:
+          - not_null
+
+      - name: gross_sales_amount
+        description: Total gross sales amount associated with the status.
+        data_tests:
+          - not_null
+
+      - name: discount_amount
+        description: Total discount amount associated with the status.
+        data_tests:
+          - not_null
+
+      - name: net_sales_amount
+        description: Total net sales amount associated with the status.
+        data_tests:
+          - not_null
+
+      - name: estimated_cogs
+        description: Estimated cost of goods sold associated with the status.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_profit
+        description: >
+          Estimated gross profit calculated from available sales and cost data.
+          This is not final net profit because marketplace fees and other
+          operating costs are not fully available.
+        data_tests:
+          - not_null
+
+      - name: estimated_gross_margin_pct
+        description: >
+          Derived analytical margin percentage calculated as
+          estimated gross profit divided by net sales.
+
+      - name: cod_amount
+        description: Total COD amount associated with orders in the status.
+
+      - name: business_payment
+        description: Total business payment amount associated with the status.
+
+      - name: zero_net_sales_orders
+        description: Number of orders whose net sales amount equals zero.
+        data_tests:
+          - not_null
+
+      - name: negative_profit_orders
+        description: Number of orders whose estimated gross profit is negative.
+        data_tests:
+          - not_null
+
+      - name: zero_cost_orders
+        description: Number of orders flagged as containing zero-cost items.
+        data_tests:
+          - not_null
+
+      - name: net_formula_mismatch_orders
+        description: >
+          Number of orders flagged with a net-sales formula mismatch.
+          This is retained as a data-quality monitoring metric.
+        data_tests:
+          - not_null
+
+  - name: customer_lifetime_value
+    description: >
+      Historical customer lifetime revenue for ZOSEO.
+      Excludes Shopee and TikTok.
+      Includes status_id 60 only.
+      Grain: one row per customer_id.
+
+    columns:
+      - name: customer_id
+        description: Unique customer identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: total_orders
+        data_tests:
+          - not_null
+
+      - name: lifetime_revenue
+        data_tests:
+          - not_null
+
+      - name: first_order_date
+        data_tests:
+          - not_null
+
+      - name: last_order_date
+        data_tests:
+          - not_null
+      - name: customer_segment
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - VIP
+                  - Loyal
+                  - High Value New
+                  - At Risk
+                  - Regular
+
+      - name: repeat_customer_flag
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
+      - name: priority_member_flag
+        data_tests:
+          - not_null
+
+  - name: customer_rfm
+    description: >
+      RFM behavioral analytics for identified ZOSEO
+      customers, based on historical CLV.
+
+    columns:
+      - name: customer_id
+        data_tests:
+          - not_null
+          - unique
+
+      - name: r_score
+        data_tests:
+          - not_null
+
+      - name: f_score
+        data_tests:
+          - not_null
+
+      - name: m_score
+        data_tests:
+          - not_null
+
+      - name: rfm_code
+        data_tests:
+          - not_null
+
+      - name: rfm_segment
+        data_tests:
+          - not_null
+  - name: cohort_analytics
+    description: >
+      Customer cohort and retention analytics for ZOSEO.
+      Based on valid customer purchases.
+
+    columns:
+      - name: cohort_month
+        data_tests:
+          - not_null
+
+      - name: month_index
+        data_tests:
+          - not_null
+
+      - name: cohort_size
+        data_tests:
+          - not_null
+
+      - name: retained_customers
+        data_tests:
+          - not_null
+
+      - name: retention_rate
+        data_tests:
+          - not_null
