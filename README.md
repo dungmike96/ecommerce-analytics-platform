@@ -202,8 +202,6 @@ Cơ chế chính:
 
 # 9. Dashboard (Power BI)
 
-> Ảnh dưới đây dùng dữ liệu đã che số liệu.
-
 | Trang | Nội dung |
 |---|---|
 | Overview | <điền: KPI chính của trang> |
@@ -274,27 +272,7 @@ dbt build
 - dbt 4 layer: staging, intermediate, warehouse, analytics
 - 28 singular tests đối soát
 - Automation PowerShell và backup S3
+# 13. Tác giả
 
-**Chưa kiểm chứng:**
-
-- Chạy end-to-end ngoài môi trường gốc (cần database và credential riêng)
-- `dbt build` trên môi trường mới sau khi đã ẩn danh tên
-
-**Không có trong repo:**
-
-- Dữ liệu thật, credential, file `.env`, `profiles.yml`
-- File Power BI gốc (chỉ có ảnh và bản demo đã che số liệu)
-
----
-
-# 13. Bài học
-
-<Viết 3-4 ý của riêng bạn. Gợi ý: điều gì bạn sẽ làm khác nếu làm lại, đánh đổi nào bạn đã chấp nhận
-(ví dụ ưu tiên đối soát chính xác hơn là ra dashboard nhanh), và điều gì bạn học được về dữ liệu thương mại điện tử.>
-
----
-
-# 14. Tác giả
-
-**<Tên của bạn>** · Analytics Engineer / Data Analyst
-<LinkedIn> · <Email liên hệ>
+**Nguyễn Văn Dũng** · Analytics Engineer / Data Analyst
+https://www.linkedin.com/in/dungnv13496/ · nguyenvandung13896@gmail.com
