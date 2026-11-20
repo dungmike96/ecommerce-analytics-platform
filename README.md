@@ -1,1490 +1,300 @@
-\# Ecommerce Data Warehouse
+# Ecommerce Analytics Platform
 
+Dự án cá nhân xây dựng **end-to-end data platform** cho một công ty ecommerce tại Việt Nam
+(bán hàng qua Nhanh.vn, sàn TikTok Shop và website). Dự án đi từ việc kéo dữ liệu từ API,
+lưu vào PostgreSQL, mô hình hóa bằng dbt, đến dashboard Power BI cho quản trị.
 
+> **Lưu ý:** tên công ty, tài nguyên cloud và số liệu trong repo này đã được ẩn danh.
+> Repo không chứa dữ liệu khách hàng, credential hay số liệu kinh doanh thật.
 
-Data Warehouse phục vụ thu thập, chuẩn hóa và phân tích dữ liệu Ecommerce của công ty.
+---
 
+# 1. Bối cảnh và vấn đề
 
+<Viết 3-5 câu bằng lời của bạn. Gợi ý: dữ liệu nằm rời rạc ở nhiều nguồn, báo cáo làm tay mỗi tuần,
+số doanh thu giữa các nguồn không khớp nhau, và không ai biết nên tin số nào.
+Một chi tiết thật bạn nhớ (người cụ thể, một lần số liệu bị lệch) sẽ thuyết phục hơn mô tả chung.>
 
-Nguồn dữ liệu hiện tại:
+Mục tiêu của dự án:
 
+- Gom dữ liệu từ nhiều nguồn về một nơi duy nhất
+- Chuẩn hóa business logic trong dbt thay vì rải rác trong Excel hoặc Power BI
+- Có kiểm tra tự động (tests) để số liệu báo cáo đối soát được với dữ liệu gốc
+- Cung cấp dataset sẵn sàng cho Power BI
 
+---
 
-\- Nhanh.vn API v3.0
-
-
-
-Hệ thống được xây dựng để phục vụ:
-
-
-
-\- Power BI
-
-\- Grafana
-
-\- Báo cáo quản trị
-
-\- Phân tích dữ liệu Ecommerce
-
-
-
-\---
-
-
-
-\# 1. Architecture
-
-
-
-Luồng dữ liệu tổng thể:
-
-
+# 2. Architecture
 
 ```text
-
-Nhanh.vn API
-
-&#x20;     │
-
-&#x20;     ▼
-
-┌───────────────────────┐
-
-│ 1. RAW                │
-
-│ PostgreSQL            │
-
-│ raw.nhanh\_orders      │
-
-└──────────┬────────────┘
-
-           │
-
-           ▼
-
-┌───────────────────────┐
-
-│ 2. STAGING            │
-
-│ dbt                   │
-
-│ stg\_nhanh\_\*           │
-
-│                       │
-
-│ Cleaning / Casting    │
-
-└──────────┬────────────┘
-
-           │
-
-           ▼
-
-┌───────────────────────┐
-
-│ 3. INTERMEDIATE       │
-
-│ dbt                   │
-
-│ int\_\*                 │
-
-│                       │
-
-│ Business Transform    │
-
-└──────────┬────────────┘
-
-           │
-
-           ▼
-
-┌───────────────────────┐
-
-│ 4. WAREHOUSE / CORE   │
-
-│ PostgreSQL            │
-
-│ data\_schema           │
-
-│                       │
-
-│ dim\_\* / fact\_\*        │
-
-└──────────┬────────────┘
-
-           │
- 
-           ▼
-
-┌───────────────────────┐
-
-│ 5. ANALYTICS / MART   │
-
-│ dbt                   │
-
-│ analytics             │
-
-│ mart\_\*                │
-
-└──────────┬────────────┘
-
-           │
-
-           ├──────────► Power BI
-
-           │
-
-           └──────────► Grafana
-
+Nhanh.vn API   GA4   Google Sheets (chi phí)
+      │         │          │
+      ▼         ▼          ▼
+┌───────────────────────────────┐
+│ 1. RAW                        │
+│ PostgreSQL (schema raw)       │
+│ Python ingestion              │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 2. STAGING          (dbt)     │
+│ stg_*                         │
+│ Parse JSON, rename, cast      │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 3. INTERMEDIATE     (dbt)     │
+│ int_*                         │
+│ Phân loại đơn, làm giàu dữ    │
+│ liệu, business transform      │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 4. WAREHOUSE        (dbt)     │
+│ PostgreSQL (data_schema)      │
+│ dim_* / fact_*                │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 5. ANALYTICS        (dbt)     │
+│ fct_* / customer_* / cohort   │
+│ GA4 daily marts               │
+└──────────────┬────────────────┘
+               ▼
+          Power BI
 ```
 
+Sơ đồ chi tiết hơn: [`docs/architecture.png`](docs/architecture.png)
 
+## Nguyên tắc thiết kế
 
-\## Nguyên tắc
+- **RAW** giữ dữ liệu gần với API gốc nhất (lưu JSON payload), không sửa dữ liệu.
+- **dbt** chịu trách nhiệm cleaning, transformation, business logic, dimensional modeling.
+- **Power BI** không đọc trực tiếp JSON từ RAW, chỉ đọc từ layer `warehouse` và `analytics`.
+- Ingestion dùng **UPSERT** nên chạy lại nhiều lần không nhân đôi dữ liệu.
 
+---
 
-
-RAW giữ dữ liệu gần với API gốc nhất.
-
-
-
-dbt chịu trách nhiệm:
-
-
-
-\- chuẩn hóa
-
-\- cleaning
-
-\- transformation
-
-\- business logic
-
-\- dimensional modeling
-
-\- analytics marts
-
-
-
-Power BI và Grafana không đọc trực tiếp JSON từ RAW.
-
-
-
-\---
-
-
-
-\# 2. Project Structure
-
-
-
-```text
-
-ecommerce-dwh/
-
-│
-
-├── ingestion/
-
-│   └── ingest\_nhanh\_orders.py
-
-│
-
-├── dbt/
-
-│   ├── models/
-
-│   │   ├── staging/
-
-│   │   ├── intermediate/
-
-│   │   ├── warehouse/
-
-│   │   └── analytics/
-
-│   │
-
-│   ├── snapshots/
-
-│   ├── macros/
-
-│   ├── tests/
-
-│   └── dbt\_project.yml
-
-│
-
-├── sql/
-
-│   ├── migrations/
-
-│   ├── quality\_checks/
-
-│   └── diagnostics/
-
-│
-
-├── .env.example
-
-├── .gitignore
-
-├── requirements.txt
-
-└── README.md
-
-```
-
-
-
-Không commit:
-
-
-
-```text
-
-.env
-
-.venv/
-
-target/
-
-logs/
-
-dbt\_packages/
-
-```
-
-
-
-\---
-
-
-
-\# 3. Technology Stack
-
-
+# 3. Technology Stack
 
 | Component | Technology |
-
 |---|---|
-
-| Source | Nhanh.vn API v3.0 |
-
+| Nguồn dữ liệu | Nhanh.vn API v3.0, Google Analytics 4, Google Sheets |
 | Ingestion | Python |
-
 | Database | PostgreSQL |
-
 | Transformation | dbt |
-
 | BI | Power BI |
-
-| Monitoring / Dashboard | Grafana |
-
+| Automation | PowerShell, backup PostgreSQL lên AWS S3 |
+| AI agents (thử nghiệm) | n8n + Ollama (Docker Compose) |
 | Version Control | Git |
 
+---
 
-
-\---
-
-
-
-\# 4. Environment Setup
-
-
-
-\## Requirements
-
-
-
-Project hiện được phát triển với:
-
-
+# 4. Project Structure
 
 ```text
-
-Python 3.10
-
-PostgreSQL
-
-Git
-
+ecommerce-analytics-platform/
+│
+├── ingestion/            Python ingestion (Nhanh.vn, GA4, Google Sheets)
+├── dbt/
+│   ├── models/
+│   │   ├── staging/
+│   │   ├── intermediate/
+│   │   ├── warehouse/
+│   │   └── analytics/
+│   ├── tests/            singular tests (đối soát, grain, KPI contract)
+│   ├── macros/
+│   └── docs/             mapping dữ liệu staging
+├── sql/
+│   ├── migrations/
+│   ├── quality_checks/
+│   └── diagnostics/
+├── automation/           PowerShell: chạy pipeline, backup lên S3
+├── ai_agents/            n8n + Ollama (Docker Compose)
+├── docs/                 sơ đồ kiến trúc, ảnh dashboard
+├── .env.example
+├── requirements.txt
+└── README.md
 ```
 
+---
 
+# 5. dbt Layers
 
-Python 3.11+ được khuyến nghị cho môi trường production mới.
+## Staging (`stg_*`)
 
+Parse JSON từ RAW, đổi tên cột, ép kiểu dữ liệu, chuẩn hóa timestamp.
 
+| Nhóm | Model |
+|---|---|
+| Nhanh.vn | `stg_nhanh_orders`, `stg_nhanh_order_items`, `stg_nhanh_order_gifts`, `stg_nhanh_customers`, `stg_nhanh_products`, `stg_nhanh_inventory`, `stg_nhanh_categories` |
+| GA4 | `stg_ga4_events_daily`, `stg_ga4_landing_pages_daily`, `stg_ga4_traffic_acquisition_daily` |
+| Chi phí | `stg_google_sheets_expenses` |
 
-\---
+## Intermediate (`int_*`)
 
+Join dữ liệu, phân loại đơn hàng, tính toán logic dùng lại nhiều nơi.
 
+`int_nhanh_orders_enriched`, `int_nhanh_orders_classified`, `int_nhanh_order_items_enriched`
 
-\## Create Virtual Environment
+## Warehouse (`dim_*`, `fact_*`)
 
+Schema đích: `data_schema`.
 
+| Loại | Model |
+|---|---|
+| Dimension | `dim_channel`, `dim_customers`, `dim_date`, `dim_time`, `dim_product`, `dim_product_category`, `dim_status` |
+| Fact | `fact_orders`, `fact_order_items`, `fact_inventory_snapshot` |
 
-Windows PowerShell:
+## Analytics
 
+| Nhóm | Model |
+|---|---|
+| Doanh thu và kênh | `fct_daily_sales`, `fct_channel_performance`, `fct_product_performance`, `fct_status_performance` |
+| Khách hàng | `customer_rfm`, `customer_lifetime_value`, `cohort_analytics` |
+| GA4 | `ga4_acquisition_daily`, `ga4_events_daily`, `ga4_landing_page_daily` |
 
+---
+
+# 6. Data Quality
+
+Dự án không dừng ở việc "build bảng", mà kiểm tra để số liệu đối soát được.
+
+- **28 singular tests** trong `dbt/tests/` (đếm theo danh sách file), gồm các nhóm:
+  - **Reconciliation:** số liệu ở layer sau phải khớp layer trước
+    (ví dụ `fct_daily_sales` khớp `fact_orders`, `fact_order_items` khớp `int_*`)
+  - **Grain:** mỗi bảng có đúng một dòng cho mỗi khóa nghiệp vụ
+  - **Công thức tài chính:** net sales, order net không được lệch công thức
+  - **KPI contract:** các KPI dùng trong BI phải đúng định nghĩa đã thống nhất
+- **SQL quality checks** cho RAW: `sql/quality_checks/`
+- **Migrations** lưu trong `sql/migrations/` để mọi thay đổi database truy vết được qua Git
+
+---
+
+# 7. Ingestion
+
+| Script | Nguồn | Ghi chú |
+|---|---|---|
+| `ingest_nhanh_orders.py` | Nhanh.vn | Historical backfill chia theo time window, sau đó incremental |
+| `ingest_nhanh_customers.py` | Nhanh.vn | |
+| `ingest_nhanh_products_inventory.py` | Nhanh.vn | Sản phẩm và tồn kho |
+| `ingest_nhanh_categories.py` | Nhanh.vn | |
+| `ingest_ga4_mkt.py` | Google Analytics 4 | |
+| `ingest_google_sheets_expenses.py` | Google Sheets | Chi phí |
+
+Cơ chế chính:
+
+- **Watermark:** lưu mốc thời gian lần chạy trước, lần sau chỉ lấy dữ liệu thay đổi
+- **UPSERT** theo khóa nghiệp vụ (ví dụ `order_id`): đơn mới thì INSERT, đơn đã đổi thì UPDATE
+- Credential đọc từ biến môi trường, không hard-code trong source
+
+---
+
+# 8. Automation
+
+| File | Việc |
+|---|---|
+| `automation/run_data_pipeline.ps1` | Chạy các luồng ingestion rồi dbt |
+| `automation/test_run_data_pipeline_diagnostic.ps1` | Bản chạy có báo cáo chẩn đoán lỗi |
+| `automation/run_backup_s3.ps1` | Backup PostgreSQL và upload lên S3 (AWS CLI) |
+
+---
+
+# 9. Dashboard (Power BI)
+
+> Ảnh dưới đây dùng dữ liệu đã che số liệu.
+
+| Trang | Nội dung |
+|---|---|
+| Overview | <điền: KPI chính của trang> |
+| Marketing | <điền> |
+| Customer Behavior | <điền: RFM, cohort> |
+| Inventory | <điền> |
+
+<!-- Thay bằng ảnh thật sau khi xuất -->
+![Overview](docs/dashboard/overview.png)
+
+---
+
+# 10. Kết quả
+
+<Chỉ điền số bạn tự đo được. Ví dụ định dạng:
+- Báo cáo doanh thu tuần: từ <X giờ làm tay> xuống <Y phút>
+- Số model dbt: <N>, số test: 28
+Nếu chưa có số đo, ghi rõ "chưa đo" thay vì ước lượng.>
+
+---
+
+# 11. Cách chạy local
+
+> Cần PostgreSQL của riêng bạn và credential API riêng.
+> Repo này chỉ chứa code, không kèm dữ liệu.
+
+## Tạo virtual environment (Windows PowerShell)
 
 ```powershell
-
 python -m venv .venv
-
-```
-
-
-
-Activate:
-
-
-
-```powershell
-
-.\\.venv\\Scripts\\Activate.ps1
-
-```
-
-
-
-Kiểm tra:
-
-
-
-```powershell
-
-python -c "import sys; print(sys.executable)"
-
-```
-
-
-
-Python phải trỏ tới:
-
-
-
-```text
-
-ecommerce-dwh\\.venv\\Scripts\\python.exe
-
-```
-
-
-
-\---
-
-
-
-\# 5. Install Dependencies
-
-
-
-```powershell
-
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-
 pip install -r requirements.txt
-
 ```
 
-
-
-Kiểm tra dbt:
-
-
+## Cấu hình biến môi trường
 
 ```powershell
-
-dbt --version
-
-```
-
-
-
-\---
-
-
-
-\# 6. Environment Variables
-
-
-
-Copy file:
-
-
-
-```powershell
-
 Copy-Item .env.example .env
-
 ```
 
+Điền giá trị vào `.env` (file này đã nằm trong `.gitignore`, **không bao giờ commit**).
 
-
-Sau đó cấu hình `.env`.
-
-
-
-Ví dụ:
-
-
-
-```env
-
-NHANH\_APP\_ID=
-
-NHANH\_BUSINESS\_ID=
-
-NHANH\_ACCESS\_TOKEN=
-
-
-
-NHANH\_BACKFILL\_START\_DATE=
-
-
-
-NHANH\_PAGE\_SIZE=100
-
-NHANH\_HTTP\_TIMEOUT=60
-
-NHANH\_MAX\_RETRIES=3
-
-
-
-DB\_HOST=
-
-DB\_PORT=5432
-
-DB\_NAME=
-
-DB\_USER=
-
-DB\_PASSWORD=
-
-```
-
-
-
-\## Security
-
-
-
-`.env` chứa credential thật và tuyệt đối không được commit lên Git.
-
-
-
-Các thông tin sau không được hard-code vào source code:
-
-
-
-\- Access Token
-
-\- Database password
-
-\- API credentials
-
-
-
-\---
-
-
-
-\# 7. RAW Ingestion
-
-
-
-Pipeline:
-
-
-
-```text
-
-ingestion/ingest\_nhanh\_orders.py
-
-```
-
-
-
-Chạy:
-
-
+## Chạy ingestion
 
 ```powershell
-
-python .\\ingestion\\ingest\_nhanh\_orders.py
-
+python .\ingestion\ingest_nhanh_orders.py
 ```
 
+## Chạy dbt
 
-
-Pipeline kết nối:
-
-
-
-```text
-
-Nhanh.vn API
-
-&#x20;     ↓
-
-Python ingestion
-
-&#x20;     ↓
-
-PostgreSQL
-
-&#x20;     ↓
-
-raw.nhanh\_orders
-
-```
-
-
-
-\---
-
-
-
-\# 8. Historical Backfill
-
-
-
-Ở lần chạy đầu tiên, pipeline lấy dữ liệu lịch sử từ:
-
-
-
-```env
-
-NHANH\_BACKFILL\_START\_DATE
-
-```
-
-
-
-Nhanh.vn Order API giới hạn khoảng thời gian truy vấn, vì vậy pipeline chia historical data thành các time windows phù hợp.
-
-
-
-Historical backfill chỉ cần thực hiện khi chưa có watermark tương ứng.
-
-
-
-\---
-
-
-
-\# 9. Incremental Ingestion
-
-
-
-Sau khi historical backfill hoàn thành, pipeline sử dụng:
-
-
-
-```text
-
-updatedAtFrom
-
-updatedAtTo
-
-```
-
-
-
-thay vì tải lại toàn bộ lịch sử.
-
-
-
-Luồng:
-
-
-
-```text
-
-Watermark
-
-   ↓
-
-updatedAtFrom
-
-   ↓
-
-Nhanh.vn API
-
-   ↓
-
-Orders changed since previous run
-
-   ↓
-
-UPSERT
-
-   ↓
-
-New Watermark
-
-```
-
-
-
-Điều này cho phép pipeline xử lý cả:
-
-
-
-```text
-
-New Order
-
-  → INSERT
-
-
-
-Existing Order changed
-
-  → UPDATE
-
-```
-
-
-
-Khóa nghiệp vụ hiện tại:
-
-
-
-```text
-
-order\_id
-
-```
-
-
-
-\---
-
-
-
-\# 10. Watermark
-
-
-
-Trạng thái incremental được quản lý tại:
-
-
-
-```text
-
-raw.ingestion\_watermark
-
-```
-
-
-
-Có thể kiểm tra bằng:
-
-
-
-```sql
-
-SELECT \*
-
-FROM raw.ingestion\_watermark;
-
-```
-
-
-
-Không tự ý xóa watermark trên production.
-
-
-
-Xóa watermark có thể khiến pipeline thực hiện historical backfill lại.
-
-
-
-\---
-
-
-
-\# 11. RAW Data Quality
-
-
-
-Các SQL kiểm tra RAW nằm tại:
-
-
-
-```text
-
-sql/quality\_checks/
-
-```
-
-
-
-Ví dụ kiểm tra tổng quan:
-
-
-
-```sql
-
-SELECT
-
-   COUNT(\*) AS total\_orders,
-
-   COUNT(DISTINCT order\_id) AS unique\_orders,
-
-   COUNT(DISTINCT source\_depot\_id) AS total\_depots,
-
-   MIN(source\_created\_at) AS oldest\_order,
-
-   MAX(source\_created\_at) AS newest\_order,
-
-   MAX(source\_updated\_at) AS latest\_updated
-
-FROM raw.nhanh\_orders;
-
-```
-
-
-
-Các kiểm tra quan trọng:
-
-
-
-```text
-
-total\_orders
-
-unique\_orders
-
-duplicate order\_id
-
-missing order\_id
-
-missing payload
-
-oldest order
-
-newest order
-
-latest updated
-
-watermark
-
-```
-
-
-
-\---
-
-
-
-\# 12. Database Migrations
-
-
-
-Các thay đổi cấu trúc database được lưu tại:
-
-
-
-```text
-
-sql/migrations/
-
-```
-
-
-
-Không nên chỉ chạy SQL thay đổi database trong DBeaver mà không lưu lại source SQL.
-
-
-
-Mục tiêu là mọi thay đổi quan trọng của database đều có thể truy vết qua Git.
-
-
-
-\---
-
-
-
-\# 13. Diagnostics
-
-
-
-Các query dùng để kiểm tra payload hoặc debug nằm tại:
-
-
-
-```text
-
-sql/diagnostics/
-
-```
-
-
-
-Ví dụ:
-
-
-
-```sql
-
-SELECT
-
-&#x20;   order\_id,
-
-&#x20;   jsonb\_pretty(api\_response)
-
-FROM raw.nhanh\_orders
-
-LIMIT 1;
-
-```
-
-
-
-Diagnostic SQL không phải business transformation.
-
-
-
-Business transformation phải được thực hiện trong dbt.
-
-
-
-\---
-
-
-
-\# 14. dbt Setup
-
-
-
-Project dbt nằm tại:
-
-
-
-```text
-
-dbt/
-
-```
-
-
-
-Di chuyển vào project:
-
-
+Cần tự tạo file `profiles.yml` của dbt trỏ tới PostgreSQL của bạn (không có trong repo).
 
 ```powershell
-
-cd .\\dbt
-
-```
-
-
-
-Kiểm tra cấu hình:
-
-
-
-```powershell
-
+cd .\dbt
+dbt deps
 dbt debug
-
-```
-
-
-
-Kết quả yêu cầu:
-
-
-
-```text
-
-Connection test: OK
-
-All checks passed!
-
-```
-
-
-
-\---
-
-
-
-\# 15. dbt Layers
-
-
-
-\## Staging
-
-
-
-```text
-
-models/staging/
-
-```
-
-
-
-Nhiệm vụ:
-
-
-
-\- parse JSON từ RAW
-
-\- rename columns
-
-\- cast datatype
-
-\- chuẩn hóa timestamp
-
-\- cleaning cơ bản
-
-
-
-Naming:
-
-
-
-```text
-
-stg\_nhanh\_orders
-
-stg\_nhanh\_products
-
-stg\_nhanh\_customers
-
-```
-
-
-
-\---
-
-
-
-\## Intermediate
-
-
-
-```text
-
-models/intermediate/
-
-```
-
-
-
-Nhiệm vụ:
-
-
-
-\- join dữ liệu
-
-\- deduplication
-
-\- business transformations
-
-\- reusable business logic
-
-
-
-Naming:
-
-
-
-```text
-
-int\_\*
-
-```
-
-
-
-\---
-
-
-
-\## Warehouse / Core
-
-
-
-```text
-
-models/warehouse/
-
-```
-
-
-
-Schema đích:
-
-
-
-```text
-
-data\_schema
-
-```
-
-
-
-Nhiệm vụ:
-
-
-
-\- dimensions
-
-\- facts
-
-\- historical modeling
-
-\- business entities
-
-
-
-Naming:
-
-
-
-```text
-
-dim\_\*
-
-fact\_\*
-
-```
-
-
-
-\---
-
-
-
-\## Analytics / Mart
-
-
-
-```text
-
-models/analytics/
-
-```
-
-
-
-Nhiệm vụ:
-
-
-
-\- KPI
-
-\- reporting tables/views
-
-\- BI-ready datasets
-
-
-
-Naming:
-
-
-
-```text
-
-mart\_\*
-
-```
-
-
-
-Power BI và Grafana ưu tiên kết nối tới layer này.
-
-
-
-\---
-
-
-
-\# 16. Run dbt
-
-
-
-Kiểm tra connection:
-
-
-
-```powershell
-
-cd .\\dbt
-
-dbt debug
-
-```
-
-
-
-Chạy models:
-
-
-
-```powershell
-
-dbt run
-
-```
-
-
-
-Chạy tests:
-
-
-
-```powershell
-
-dbt test
-
-```
-
-
-
-Có thể chạy:
-
-
-
-```powershell
-
 dbt build
-
 ```
 
+---
 
+# 12. Trạng thái dự án
 
-để build và test resources theo dependency graph.
+**Đã xây dựng (có trong repo):**
 
+- Ingestion từ Nhanh.vn, GA4, Google Sheets vào RAW
+- dbt 4 layer: staging, intermediate, warehouse, analytics
+- 28 singular tests đối soát
+- Automation PowerShell và backup S3
 
+**Chưa kiểm chứng:**
 
-\---
+- Chạy end-to-end ngoài môi trường gốc (cần database và credential riêng)
+- `dbt build` trên môi trường mới sau khi đã ẩn danh tên
 
+**Không có trong repo:**
 
+- Dữ liệu thật, credential, file `.env`, `profiles.yml`
+- File Power BI gốc (chỉ có ảnh và bản demo đã che số liệu)
 
-\# 17. Operational Flow
+---
 
+# 13. Bài học
 
+<Viết 3-4 ý của riêng bạn. Gợi ý: điều gì bạn sẽ làm khác nếu làm lại, đánh đổi nào bạn đã chấp nhận
+(ví dụ ưu tiên đối soát chính xác hơn là ra dashboard nhanh), và điều gì bạn học được về dữ liệu thương mại điện tử.>
 
-Quy trình production mục tiêu:
+---
 
+# 14. Tác giả
 
-
-```text
-
-Nhanh.vn
-
-   ↓
-
-Python Ingestion
-
-   ↓
-
-RAW
-
-   ↓
-
-dbt STAGING
-
-   ↓
-
-dbt INTERMEDIATE
-
-   ↓
-
-WAREHOUSE
-
-   ↓
-
-ANALYTICS
-
-   ↓
-
-Power BI / Grafana
-
-```
-
-
-
-Ingestion được thiết kế để chạy định kỳ.
-
-
-
-Mục tiêu vận hành:
-
-
-
-```text
-
-00:00
-
-08:00
-
-16:00
-
-```
-
-
-
-Việc scheduling production sẽ được cấu hình trên server/VPS, không phụ thuộc vào laptop cá nhân.
-
-
-
-\---
-
-
-
-\# 18. Development Workflow
-
-
-
-Khi phát triển:
-
-
-
-```text
-
-1\. Activate .venv
-
-2\. Pull latest source code
-
-3\. Thay đổi code
-
-4\. Test local
-
-5\. Kiểm tra dbt
-
-6\. Kiểm tra secrets
-
-7\. Commit
-
-8\. Push
-
-```
-
-
-
-Ví dụ:
-
-
-
-```powershell
-
-.\\.venv\\Scripts\\Activate.ps1
-
-
-
-cd .\\dbt
-
-dbt debug
-
-dbt build
-
-```
-
-
-
-\---
-
-
-
-\# 19. Git Rules
-
-
-
-Được commit:
-
-
-
-```text
-
-Python source code
-
-dbt models
-
-SQL migrations
-
-SQL quality checks
-
-SQL diagnostics
-
-.env.example
-
-requirements.txt
-
-README.md
-
-```
-
-
-
-Không được commit:
-
-
-
-```text
-
-.env
-
-password
-
-access token
-
-.venv
-
-database dump
-
-raw company data
-
-dbt target
-
-logs
-
-```
-
-
-
-\---
-
-
-
-\# 20. Deployment / Handover
-
-
-
-Khi chuyển sang máy khác hoặc VPS:
-
-
-
-```text
-
-git clone repository
-
-       ↓
-
-create .venv
-
-       ↓
-
-pip install -r requirements.txt
-
-       ↓
-
-create .env
-
-       ↓
-
-configure PostgreSQL
-
-       ↓
-
-dbt debug
-
-       ↓
-
-run ingestion
-
-       ↓
-
-run dbt
-
-       ↓
-
-configure scheduler
-
-```
-
-
-
-Nhờ đó project không phụ thuộc vào máy của một cá nhân.
-
-
-
-\---
-
-
-
-\# 21. Current Data Pipeline Status
-
-
-
-Đã triển khai:
-
-
-
-\- Nhanh.vn Order API ingestion
-
-\- Historical backfill
-
-\- Pagination
-
-\- RAW PostgreSQL storage
-
-\- JSON payload storage
-
-\- Metadata
-
-\- UPSERT theo order\_id
-
-\- Incremental ingestion theo updatedAt
-
-\- Watermark
-
-\- RAW quality checks
-
-\- dbt PostgreSQL connection
-
-
-
-Đang triển khai:
-
-
-
-\- dbt Staging
-
-\- Intermediate
-
-\- Warehouse
-
-\- Analytics marts
-
-\- Power BI
-
-\- Grafana
-
-\- Production scheduling
-
-
-
-\---
-
-
-
-\# 22. Important Operational Rules
-
-
-
-1\. Không xóa RAW khi chưa có backup và kế hoạch recovery.
-
-2\. Không xóa watermark tùy ý.
-
-3\. Không hard-code credential.
-
-4\. Không commit `.env`.
-
-5\. Không chỉnh dữ liệu production trực tiếp nếu chưa xác định ảnh hưởng.
-
-6\. Schema change phải được lưu lại bằng migration/dbt code.
-
-7\. Business logic nên nằm trong dbt thay vì Power BI khi có thể.
-
-8\. Dashboard không nên phụ thuộc trực tiếp vào RAW JSON.
-
+**<Tên của bạn>** · Analytics Engineer / Data Analyst
+<LinkedIn> · <Email liên hệ>
